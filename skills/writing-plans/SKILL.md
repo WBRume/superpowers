@@ -15,12 +15,59 @@ Assume they are a skilled developer, but know almost nothing about our toolset o
 
 **Context:** This should be run in a dedicated worktree (created by brainstorming skill).
 
-**Save plans to:** `docs/superpowers/plans/YYYY-MM-DD-<feature-name>.md`
-- (User preferences for plan location override this default)
+**Save plans to:**
+- Single-plan mode (default): `docs/superpowers/plans/YYYY-MM-DD-<feature-name>.md`
+- Full-stack layered mode (required for frontend+backend work):
+  `docs/superpowers/plans/YYYY-MM-DD-<feature-name>/api_plan.md`
+  `docs/superpowers/plans/YYYY-MM-DD-<feature-name>/frontend_plan.md`
+  `docs/superpowers/plans/YYYY-MM-DD-<feature-name>/backend_plan.md`
+- (User preferences for plan location override these defaults)
 
 ## Scope Check
 
 If the spec covers multiple independent subsystems, it should have been broken into sub-project specs during brainstorming. If it wasn't, suggest breaking this into separate plans — one per subsystem. Each plan should produce working, testable software on its own.
+
+## Layered Planning Mode (Full-Stack Required)
+
+When a request includes both frontend and backend implementation, you MUST use layered planning mode. Do not produce one mixed implementation plan.
+
+**Hard dependency order (never violate):**
+1. Write `api_plan.md` first
+2. Write `frontend_plan.md` based on the finalized API plan
+3. Write `backend_plan.md` based on the finalized API plan
+
+**Strict rule:** Never start `frontend_plan.md` or `backend_plan.md` before `api_plan.md` is complete and stable.
+
+**Layer content requirements:**
+- `api_plan.md` defines all endpoints, HTTP methods, paths, request fields, response fields, types, error responses, and contract examples.
+- `frontend_plan.md` defines component tree, state/data flow, and mock-consumption behavior bound to the contract (`MOCK_BASE_URL`, fallback `API_MOCK_BASE_URL`).
+  If the frontend stack is Vite, the plan must include updating `vite.config.*` proxy target to the mock baseline source.
+- `backend_plan.md` defines data models, business logic, controller boundaries, and unit tests that enforce the same contract.
+- Both `frontend_plan.md` and `backend_plan.md` must include explicit automated test tasks and pass criteria.
+- For Vue/Vite frontend plans, test tasks must explicitly include:
+  - framework bootstrap when missing (`vitest` + `@vue/test-utils` + `jsdom`)
+  - at least one API-layer test and one UI behavior test
+  - runnable test command and expected PASS output
+
+**Contract consistency rules:**
+- Frontend and backend plans may only reference fields/types defined in `api_plan.md`.
+- If contract changes, update `api_plan.md` first, then update both downstream plans.
+- Layered implementation plans must include explicit real API interface steps for:
+  - `POST /api/workspaces/{ws_id}/api-mock/projects/{task_id}/swagger/import`
+    - request format must be `multipart/form-data` with `raw_content` or `file` or `source_url` (no JSON body)
+    - plan should show canonical invocation shape (`Invoke-RestMethod -Form` or `curl -F`)
+  - `GET /api/workspaces/{ws_id}/api-mock/projects/{task_id}/jobs/{job_id}` (poll until terminal)
+  - `GET /api/workspaces/{ws_id}/api-mock/projects/{task_id}/endpoints`
+  - `POST /api/workspaces/{ws_id}/api-mock/projects/{task_id}/endpoints/{endpoint_id}/auto-mock` (generate endpoint cases)
+  - `GET /api/workspaces/{ws_id}/api-mock/endpoints/{endpoint_id}/mock-cases` (verify coverage)
+  - `GET /api/workspaces/{ws_id}/api-mock/projects/{task_id}/context` (read canonical `mock_base_url`)
+  - Use concrete tool invocations (`curl`, `Invoke-RestMethod`, or equivalent), not pseudo "call" text
+  - Contract artifact file inputs must be absolute paths
+  - `api_mock_contract_sync.py` is deprecated and must not appear in plan steps
+  - Plan must state that API MOCK runtime context (`API_BASE_URL`, `ACCESS_TOKEN`, `WORKSPACE_ID`, `TASK_ID`) comes from platform injection, not task-repo config
+  - Plan must forbid searching task repository files for API MOCK configuration
+  - Plan must include preflight checks and explicit stop condition when runtime inputs (`API_BASE_URL`, `ACCESS_TOKEN`) or contract files are missing
+  - Execution evidence must include HTTP method, URL path, status code, and key JSON fields
 
 ## File Structure
 
@@ -56,6 +103,47 @@ This structure informs the task decomposition. Each task should produce self-con
 **Architecture:** [2-3 sentences about approach]
 
 **Tech Stack:** [Key technologies/libraries]
+
+---
+```
+
+**Layered mode headers (full-stack only):**
+
+`api_plan.md`
+```markdown
+# [Feature Name] API Plan
+
+> **For agentic workers:** This contract is the source of truth for downstream frontend/backend plans.
+
+**Goal:** [Contract scope this API plan defines]
+
+**Contract Version:** [v1 / date / revision tag]
+
+---
+```
+
+`frontend_plan.md`
+```markdown
+# [Feature Name] Frontend Plan
+
+> **Dependency:** This plan depends on `api_plan.md`. Do not redefine API schemas here.
+
+**Goal:** [UI/UX and client behavior scope]
+
+**Contract Input:** [Path to api_plan.md]
+
+---
+```
+
+`backend_plan.md`
+```markdown
+# [Feature Name] Backend Plan
+
+> **Dependency:** This plan depends on `api_plan.md`. Do not redefine API schemas here.
+
+**Goal:** [Server implementation scope]
+
+**Contract Input:** [Path to api_plan.md]
 
 ---
 ```
@@ -133,7 +221,19 @@ If you find issues, fix them inline. No need to re-review — just fix and move 
 
 ## Execution Handoff
 
-After saving the plan, offer execution choice:
+After saving the plan:
+
+**If this is layered full-stack mode:**
+
+Use this handoff exactly:
+
+**"Layered plans complete and saved to `docs/superpowers/plans/<feature-folder>/` with `api_plan.md`, `frontend_plan.md`, and `backend_plan.md`.**
+
+**Next step is REQUIRED: execute with `superpowers:subagent-driven-development` so the API contract gate (OpenAPI generation + platform sync lock) runs before frontend/backend implementation."**
+
+Do not offer inline `executing-plans` for layered full-stack mode.
+
+**If this is single-plan mode, offer execution choice:**
 
 **"Plan complete and saved to `docs/superpowers/plans/<filename>.md`. Two execution options:**
 

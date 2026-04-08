@@ -13,6 +13,48 @@ Write the test first. Watch it fail. Write minimal code to pass.
 
 **Violating the letter of the rules is violating the spirit of the rules.**
 
+## Contract-Locked Parallel TDD (Layered Full-Stack)
+
+When frontend and backend are developed in parallel from a locked API contract:
+
+- Source of truth is `openapi_spec.json` (and mock seeds if provided)
+- Subagents must not invent data structures outside the contract
+- Frontend and backend tests must both be traceable to the same contract definitions
+- Before writing lane tests, obtain live mock context via real API interfaces:
+  - `POST /api/workspaces/{ws_id}/api-mock/projects/{task_id}/swagger/import`
+    - use `multipart/form-data` with `raw_content` or `file` or `source_url` (never JSON body)
+    - use concrete command shape (`Invoke-RestMethod -Form` or `curl -F`)
+  - `GET /api/workspaces/{ws_id}/api-mock/projects/{task_id}/jobs/{job_id}` (poll until terminal)
+  - `GET /api/workspaces/{ws_id}/api-mock/projects/{task_id}/endpoints`
+  - `POST /api/workspaces/{ws_id}/api-mock/projects/{task_id}/endpoints/{endpoint_id}/auto-mock` (for each endpoint)
+  - `GET /api/workspaces/{ws_id}/api-mock/endpoints/{endpoint_id}/mock-cases` (verify coverage)
+  - `GET /api/workspaces/{ws_id}/api-mock/projects/{task_id}/context` (read canonical `mock_base_url`)
+  - Contract artifact paths must be absolute (never relative)
+  - `api_mock_contract_sync.py` is deprecated and must not be used
+  - Runtime context (`API_BASE_URL`, `ACCESS_TOKEN`, `WORKSPACE_ID`, `TASK_ID`) must come from platform injection; do not search task repository for API MOCK config
+  - If required runtime inputs (`API_BASE_URL`, `ACCESS_TOKEN`) or contract paths are missing, stop with `BLOCKED` (do not continue testing/implementation)
+  - Capture API-call evidence (`method`, `path`, `status_code`, key JSON fields) as proof
+
+**Frontend subagent requirements:**
+- API URL calls must use `MOCK_BASE_URL`
+- If `MOCK_BASE_URL` is missing, fallback to `API_MOCK_BASE_URL`
+- If both are missing, stop and request context; do not hardcode real endpoints
+- For Vite projects, ensure `vite.config.*` proxy target uses the same mock baseline source
+- For Vue/Vite projects, if test framework is missing, bootstrap `vitest` + `@vue/test-utils` + `jsdom` first
+- Vue/Vite minimum test artifacts: at least one API-layer test and one UI behavior test
+
+**Backend subagent requirements:**
+- Translate mock cases into local controller unit tests
+- Local controller test coverage must be a subset of mock-case coverage
+- Do not accept controller behavior that cannot be mapped to contract examples
+
+**Parallel lane completion rule:**
+- Frontend lane DONE requires frontend test files and passing results
+- Backend lane DONE requires backend test files and passing results
+
+**Strict prohibition:**
+- Never bypass Mock Server to define ad-hoc request/response structures
+
 ## When to Use
 
 **Always:**
@@ -284,6 +326,9 @@ Tests-first force edge case discovery before implementing. Tests-after verify yo
 - "Already spent X hours, deleting is wasteful"
 - "TDD is dogmatic, I'm being pragmatic"
 - "This is different because..."
+- "We'll bypass mock just for now"
+- "Let's add fields not in the contract"
+- "Mock URL env var is annoying, hardcode it"
 
 **All of these mean: Delete code. Start over with TDD.**
 
@@ -336,6 +381,13 @@ Before marking work complete:
 - [ ] Output pristine (no errors, warnings)
 - [ ] Tests use real code (mocks only if unavoidable)
 - [ ] Edge cases and errors covered
+- [ ] For frontend: API calls are bound to `MOCK_BASE_URL` (fallback `API_MOCK_BASE_URL`)
+- [ ] For Vite frontend: `vite.config.*` proxy target is bound to the same mock baseline source
+- [ ] For Vue/Vite frontend: test framework is present and runnable (`vitest` + Vue test utils)
+- [ ] For Vue/Vite frontend: at least one API-layer test and one UI behavior test are present
+- [ ] For backend: controller unit tests are derived from mock cases / contract examples
+- [ ] API import/context call outputs are captured and used as test input context
+- [ ] No test or production path introduces contract fields absent from `openapi_spec.json`
 
 Can't check all boxes? You skipped TDD. Start over.
 
@@ -366,6 +418,13 @@ When adding mocks or test utilities, read @testing-anti-patterns.md to avoid com
 ```
 Production code → test exists and failed first
 Otherwise → not TDD
+```
+
+For layered full-stack work:
+
+```
+No contract lock → no implementation
+No mock-bound tests → no completion
 ```
 
 No exceptions without your human partner's permission.

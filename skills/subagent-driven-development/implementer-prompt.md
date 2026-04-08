@@ -41,6 +41,71 @@ Task tool (general-purpose):
     **While you work:** If you encounter something unexpected or unclear, **ask questions**.
     It's always OK to pause and clarify. Don't guess or make assumptions.
 
+    ## Contract Context (Layered Full-Stack Tasks)
+
+    - Contract source of truth: `[openapi_spec.json path]`
+    - Mock seed reference: `[mock_cases_seed.json path]` (if provided)
+    - Frontend and backend implementation must follow the contract exactly.
+    - Contract sync output: `[import job + endpoint/mock-case summary JSON output]`
+    - Mock context output: `[mock_base_url + endpoint/mock-case context JSON output]`
+
+    **Required real API calls (controller runs before dispatch; implementer can re-run if needed):**
+    - Resolve runtime inputs first:
+      - `API_BASE_URL`, `ACCESS_TOKEN`, `WORKSPACE_ID`, `TASK_ID`, `USER_ID`
+      - `ABS_OPENAPI_SPEC_JSON` (absolute path)
+    - Runtime source rule:
+      - These inputs come from platform runtime context, not task repository files.
+      - Do not inspect project structure to locate API MOCK configuration.
+    - Preflight checks (must pass before any API import/context flow):
+      - `API_BASE_URL` and `ACCESS_TOKEN` are present
+      - Contract file exists at `ABS_OPENAPI_SPEC_JSON`
+    - If preflight fails, return `BLOCKED` and do not proceed with implementation lanes.
+    - If runtime context keys are missing, use code `PLATFORM_CONTEXT_MISSING` and list missing keys.
+    - Use concrete tool calls (for example `curl`, `Invoke-RestMethod`, or equivalent HTTP tool), not pseudo "call" statements:
+      - `POST /api/workspaces/{ws_id}/api-mock/projects/{task_id}/swagger/import`
+        - MUST send `multipart/form-data` with `raw_content` or `file` or `source_url` form field
+        - Never send JSON body to this endpoint
+        - Canonical shape examples:
+          - PowerShell: `Invoke-RestMethod -Method Post ... -Form @{ raw_content = (Get-Content -Raw $ABS_OPENAPI_SPEC_JSON) }`
+          - curl: `curl -X POST ... -F "raw_content=@/abs/path/openapi_spec.json"`
+      - `GET /api/workspaces/{ws_id}/api-mock/projects/{task_id}/jobs/{job_id}` (poll until terminal)
+      - `GET /api/workspaces/{ws_id}/api-mock/projects/{task_id}/endpoints`
+      - `POST /api/workspaces/{ws_id}/api-mock/projects/{task_id}/endpoints/{endpoint_id}/auto-mock` (trigger for each endpoint)
+      - `GET /api/workspaces/{ws_id}/api-mock/projects/{task_id}/jobs/{job_id}` (poll each auto-mock job until terminal)
+      - `GET /api/workspaces/{ws_id}/api-mock/endpoints/{endpoint_id}/mock-cases`
+      - `GET /api/workspaces/{ws_id}/api-mock/projects/{task_id}/context` (read canonical `mock_base_url` + counts)
+    - Complete all endpoint auto-mock jobs and case verification before lane dispatch.
+    - `api_mock_contract_sync.py` is deprecated and must not be used.
+    - Capture execution evidence for each API call: HTTP method, URL path, status code, and key JSON fields.
+
+    **Mock URL policy (frontend tasks):**
+    - Use `MOCK_BASE_URL` first.
+    - If missing, fallback to `API_MOCK_BASE_URL`.
+    - If both are missing, report `NEEDS_CONTEXT` instead of hardcoding URLs.
+    - For Vite projects, set dev proxy target in `vite.config.*` to the same mock baseline source.
+
+    **Backend test policy (backend tasks):**
+    - Convert platform/mock seeds into local controller unit tests.
+    - Local controller tests must be a subset of mock-case coverage.
+
+    **Test generation is mandatory:**
+    - Frontend tasks must include/update frontend tests.
+    - Backend tasks must include/update backend tests.
+    - If no tests were added, status cannot be DONE.
+    - If frontend has no testing framework, add one (Vitest preferred for Vite) before feature tests.
+    - For Vue/Vite tasks, minimum frontend test deliverables:
+      - Add runnable scripts (for example `test` or `test:unit`) in `package.json`
+      - Add test config (`vitest.config.*` or equivalent)
+      - Add at least one API consumption test (contract + mock-base usage)
+      - Add at least one UI behavior test (component/composable)
+      - Include passing test command output summary in report
+
+    **Never:**
+    - Redefine contract fields/types outside `openapi_spec.json`
+    - Bypass Mock Server by hardcoding non-mock data contracts
+    - Ship behavior that cannot be traced back to contract definitions
+    - Mark task DONE without test evidence and command output summary
+
     ## Code Organization
 
     You reason best about code you can hold in context at once, and your edits are more
@@ -103,6 +168,12 @@ Task tool (general-purpose):
     - **Status:** DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT
     - What you implemented (or what you attempted, if blocked)
     - What you tested and test results
+    - Tool command evidence:
+      - Import/status summary (`status`, `source_version_id`)
+      - Auto-mock summary (`endpoint_count`, `auto_mock_jobs_total`, `auto_mock_success_count`, `auto_mock_failed_count`)
+      - Context summary (`mock_base_url`, `endpoint_count`, `mock_case_count`, `endpoints_with_mock_cases`, `endpoints_without_mock_cases`)
+      - API-call trace lines proving real interface calls ran (`method`, `path`, `status_code`, key response fields)
+    - Proof that mock baseline wiring is active (frontend URL/proxy, backend mock-case linkage)
     - Files changed
     - Self-review findings (if any)
     - Any issues or concerns
